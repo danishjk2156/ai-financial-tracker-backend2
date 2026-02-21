@@ -217,4 +217,23 @@ For issues or questions, please open an issue on GitHub.
 
 ---
 
-**Happy Financial Tracking! 📊💰**
+## Running with Docker (Recommended for easy setup)
+
+### 1. Prerequisites
+- [Docker](https://www.docker.com/products/docker-desktop/) installed and running.
+
+### 2. Setup Environment Variables
+Make sure you have a `.env` file in the root directory (use `.env.example` as a template).
+
+### 3. Run the Application
+Run the following command in the root directory:
+
+```bash
+docker-compose up --build
+```
+
+### 4. Access the App
+- **Frontend**: http://localhost
+- **Backend API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
+
