@@ -1,7 +1,9 @@
-import React from 'react';
+import React, { useState } from 'react';
 import Card from '../Common/Card';
 import type { Profile } from '../Types';
 import { useAuth } from '../../contexts/AuthContext';
+import { updateProfile, createProfile } from '../../api/endpoints';
+import { ApiError } from '../../api/client';
 
 interface ProfilePageProps {
   profile: Profile;
@@ -10,6 +12,38 @@ interface ProfilePageProps {
 
 const ProfilePage: React.FC<ProfilePageProps> = ({ profile, setProfile }) => {
   const { user } = useAuth();
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setMessage(null);
+    try {
+      // Try updating existing profile first
+      try {
+        await updateProfile({
+          monthlyincome: profile.monthlyIncome,
+          goal: profile.savingsGoal,
+        } as unknown as { monthlyincome: number; goal: number });
+      } catch (err) {
+        const apiErr = err as ApiError;
+        if (apiErr.status === 404) {
+          await createProfile({
+            name: user?.name || user?.username || 'User',
+            monthlyincome: profile.monthlyIncome,
+            goal: profile.savingsGoal,
+          });
+        } else {
+          throw err;
+        }
+      }
+      setMessage('Profile updated successfully.');
+    } catch {
+      setMessage('Failed to update profile. Please try again.');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   return (
     <div style={styles.profileContainer}>
@@ -21,7 +55,7 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ profile, setProfile }) => {
           <label style={styles.label}>👤 Name</label>
           <input
             type="text"
-            value={user?.name || ''}
+            value={user?.name || user?.username || ''}
             style={{...styles.input, backgroundColor: '#f3f4f6', cursor: 'not-allowed'}}
             disabled
             readOnly
@@ -65,7 +99,17 @@ const ProfilePage: React.FC<ProfilePageProps> = ({ profile, setProfile }) => {
           <p style={styles.helperText}>How much you want to save each month</p>
         </div>
 
-        <button style={styles.primaryButton}>Update Profile</button>
+        {message && (
+          <p style={styles.statusMessage}>{message}</p>
+        )}
+
+        <button
+          style={styles.primaryButton}
+          onClick={handleSave}
+          disabled={saving}
+        >
+          {saving ? 'Saving...' : 'Update Profile'}
+        </button>
       </Card>
     </div>
   );

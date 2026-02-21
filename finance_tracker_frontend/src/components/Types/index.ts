@@ -18,14 +18,21 @@ export interface ChatMessage {
   text: string;
 }
 
+export interface OnlineProduct {
+  title: string;
+  price: string;
+  source: string;
+  rating: string | number;
+  reviews: string | number;
+}
+
 export interface AnalysisResult {
   productName: string;
   offline: number;
-  amazon: number;
-  flipkart: number;
   bestPrice: number;
   savings: number;
   advice: string;
+  onlineResults: OnlineProduct[];
 }
 
 export interface ExpenseInput {
@@ -41,11 +48,10 @@ export interface BuyForm {
 }
 // Add these to existing interfaces
 export interface User {
-  id: string;
-  email: string;
-  name: string;
-  profile?: Profile;
-  expenses: Expense[];
+  id: number;
+  username: string;
+  name?: string;
+  email?: string;
 }
 
 export interface LoginCredentials {

@@ -1,5 +1,5 @@
 import React from 'react';
-import { TargetIcon, AlertCircleIcon, SparklesIcon, CheckIcon } from '../Layout/Icons';
+import { TargetIcon, SparklesIcon, CheckIcon } from '../Layout/Icons';
 import Card from '../Common/Card';
 import Button from '../Common/Button';
 import type { Profile, Expense } from '../Types';
@@ -11,7 +11,7 @@ interface SavingsPageProps {
 }
 
 const SavingsPage: React.FC<SavingsPageProps> = ({ profile, expenses, setActiveTab }) => {
-  const availableToSave = profile.monthlyIncome - profile.fixedExpenses - 
+  const availableToSave = profile.monthlyIncome - profile.fixedExpenses -
     expenses.reduce((sum, exp) => sum + exp.amount, 0);
 
   return (

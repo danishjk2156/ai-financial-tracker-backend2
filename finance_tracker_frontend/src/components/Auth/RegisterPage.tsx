@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { WalletIcon, UserIcon, MailIcon, LockIcon, ArrowLeftIcon } from '../Layout/Icons';
+import { WalletIcon, MailIcon, LockIcon, ArrowLeftIcon } from '../Layout/Icons';
 import { useAuth } from '../../contexts/AuthContext';
 
 interface RegisterPageProps {
@@ -9,10 +9,8 @@ interface RegisterPageProps {
 
 const RegisterPage: React.FC<RegisterPageProps> = ({ onSwitchToLogin, onRegisterSuccess }) => {
   const [formData, setFormData] = useState({
-    name: '',
-    email: '',
+    username: '',
     password: '',
-    confirmPassword: ''
   });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -22,19 +20,8 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onSwitchToLogin, onRegister
     e.preventDefault();
     setError('');
 
-    // Validation
-    if (formData.password !== formData.confirmPassword) {
-      setError('Passwords do not match');
-      return;
-    }
-
-    if (formData.password.length < 6) {
-      setError('Password must be at least 6 characters');
-      return;
-    }
-
     setLoading(true);
-    const success = await register(formData.name, formData.email, formData.password);
+    const success = await register(formData.username, formData.password);
     setLoading(false);
 
     if (success) {
@@ -52,7 +39,7 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onSwitchToLogin, onRegister
             <WalletIcon size={40} />
           </div>
           <h1 style={styles.title}>Create Account</h1>
-          <p style={styles.subtitle}>Join PaisaWise to manage your finances</p>
+          <p style={styles.subtitle}>Create your account</p>
         </div>
 
         <form onSubmit={handleSubmit} style={styles.form}>
@@ -65,30 +52,15 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onSwitchToLogin, onRegister
 
           <div style={styles.inputGroup}>
             <label style={styles.label}>
-              <UserIcon size={16} />
-              <span style={{ marginLeft: '8px' }}>Full Name</span>
+              <MailIcon size={16} />
+              <span style={{ marginLeft: '8px' }}>Username</span>
             </label>
             <input
               type="text"
-              value={formData.name}
-              onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+              value={formData.username}
+              onChange={(e) => setFormData({ ...formData, username: e.target.value })}
               style={styles.input}
-              placeholder="Enter your name"
-              required
-            />
-          </div>
-
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>
-              <MailIcon size={16} />
-              <span style={{ marginLeft: '8px' }}>Email Address</span>
-            </label>
-            <input
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-              style={styles.input}
-              placeholder="you@example.com"
+              placeholder="Enter your username"
               required
             />
           </div>
@@ -104,21 +76,6 @@ const RegisterPage: React.FC<RegisterPageProps> = ({ onSwitchToLogin, onRegister
               onChange={(e) => setFormData({ ...formData, password: e.target.value })}
               style={styles.input}
               placeholder="At least 6 characters"
-              required
-            />
-          </div>
-
-          <div style={styles.inputGroup}>
-            <label style={styles.label}>
-              <LockIcon size={16} />
-              <span style={{ marginLeft: '8px' }}>Confirm Password</span>
-            </label>
-            <input
-              type="password"
-              value={formData.confirmPassword}
-              onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-              style={styles.input}
-              placeholder="Re-enter your password"
               required
             />
           </div>

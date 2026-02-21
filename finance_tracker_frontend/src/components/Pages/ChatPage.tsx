@@ -1,46 +1,47 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { SendIcon, SparklesIcon } from '../Layout/Icons';
-import type { ChatMessage, Profile, Expense } from '../Types';
+import type { ChatMessage } from '../Types';
 import ConsentModal from '../Common/ConsentModal';
+import { chat, voiceToText } from '../../api/endpoints';
 
 interface ChatPageProps {
   chatMessages: ChatMessage[];
   setChatMessages: React.Dispatch<React.SetStateAction<ChatMessage[]>>;
-  profile: Profile;
-  expenses: Expense[];
 }
 
 const CONSENT_STORAGE_KEY = 'paisawise_ai_consent';
 
-const ChatPage: React.FC<ChatPageProps> = ({ chatMessages, setChatMessages, profile, expenses }) => {
+const ChatPage: React.FC<ChatPageProps> = ({ chatMessages, setChatMessages }) => {
   const [chatInput, setChatInput] = useState<string>('');
   const [showConsentModal, setShowConsentModal] = useState<boolean>(false);
-  const [hasConsent, setHasConsent] = useState<boolean | null>(null);
+  const [isSending, setIsSending] = useState(false);
+
+  // Voice recording state
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   // Check consent status on mount - show modal if not accepted
   useEffect(() => {
     const consentStatus = localStorage.getItem(CONSENT_STORAGE_KEY);
     if (consentStatus === 'accepted') {
       // Consent already accepted, don't show modal
-      setHasConsent(true);
+      // Consent already accepted, don't show modal
       setShowConsentModal(false);
     } else {
       // No consent or previously denied - show modal
       setShowConsentModal(true);
-      setHasConsent(false);
     }
   }, []);
 
   const handleAcceptConsent = () => {
     localStorage.setItem(CONSENT_STORAGE_KEY, 'accepted');
-    setHasConsent(true);
     setShowConsentModal(false);
   };
 
   const handleDenyConsent = () => {
     // Remove consent from storage so it asks again next time
     localStorage.removeItem(CONSENT_STORAGE_KEY);
-    setHasConsent(false);
     setShowConsentModal(false);
   };
 
@@ -53,70 +54,76 @@ const ChatPage: React.FC<ChatPageProps> = ({ chatMessages, setChatMessages, prof
     "How to cut expenses?"
   ];
 
-  const getAIResponse = (message: string): string => {
-    // If user denied consent, provide limited responses
-    if (hasConsent === false) {
-      return "I'd love to help you with personalized financial advice, but I need your consent to access your financial data. Please refresh the page and allow data access when prompted, or use the general tips below:\n\n• Track your daily expenses\n• Set monthly savings goals\n• Review your spending regularly\n• Build an emergency fund\n• Avoid unnecessary purchases";
-    }
-
-    const lower = message.toLowerCase();
-    const availableToSave = profile.monthlyIncome - profile.fixedExpenses - 
-      expenses.reduce((sum, exp) => sum + exp.amount, 0);
-
-    if (lower.includes('save') && lower.includes('100')) {
-      return "Here's how to save ₹100 daily:\n\n• Skip one chai/coffee outside (₹20)\n• Cook lunch at home instead of ordering (₹60)\n• Use bus instead of auto once (₹20)\n\nTotal saved: ₹100/day = ₹3,000/month = ₹36,000/year! 🎯";
-    }
-    
-    if (lower.includes('afford') || lower.includes('purchase')) {
-      return `Based on your finances:\n\n✅ Monthly Income: ₹${profile.monthlyIncome}\n✅ Available to Save: ₹${availableToSave}\n\nFor purchases under ₹${Math.floor(availableToSave * 0.3)}, you're safe!\n\nFor anything above, consider:\n• Is it urgent?\n• Can you wait for a sale?\n• Do you have an alternative?`;
-    }
-    
-    if (lower.includes('overspending') || lower.includes('spending')) {
-      const totalExpenses = expenses.reduce((sum, exp) => sum + exp.amount, 0);
-      const percentOfIncome = ((totalExpenses / profile.monthlyIncome) * 100).toFixed(1);
-      
-      if (totalExpenses > profile.monthlyIncome - profile.fixedExpenses) {
-        return `⚠️ Warning! Your variable expenses are ₹${totalExpenses}.\n\nYou're spending ${percentOfIncome}% of your income. Try to:\n• Track daily expenses\n• Reduce outside food\n• Use public transport\n• Postpone non-essential purchases`;
-      } else {
-        return `✅ Good news! Your spending is under control.\n\nVariable expenses: ₹${totalExpenses} (${percentOfIncome}% of income)\n\nKeep up the good habits! 💪`;
-      }
-    }
-    
-    if (lower.includes('budget') || lower.includes('safe')) {
-      return `Your Budget Health:\n\n💰 Income: ₹${profile.monthlyIncome}\n🏠 Fixed: ₹${profile.fixedExpenses}\n💸 Variable: ₹${expenses.reduce((sum, exp) => sum + exp.amount, 0)}\n✨ Can Save: ₹${availableToSave}\n\n${availableToSave >= profile.savingsGoal ? '✅ You can meet your savings goal!' : '⚠️ Tight budget! Try reducing variable expenses.'}`;
-    }
-    
-    if (lower.includes('emergency')) {
-      const targetFund = profile.fixedExpenses * 6;
-      return `Emergency Fund Guide:\n\n🎯 Target: 6 months expenses = ₹${targetFund}\n\nTip: Financial experts recommend keeping 3-6 months of expenses as an emergency fund. Start saving today to build your emergency fund!`;
-    }
-    
-    if (lower.includes('cut') || lower.includes('reduce') || lower.includes('expense')) {
-      return "Top 5 Ways to Cut Expenses:\n\n1️⃣ Cook at home - Save ₹3,000/month\n2️⃣ Cancel unused subscriptions - Save ₹500/month\n3️⃣ Use public transport - Save ₹2,000/month\n4️⃣ Buy groceries in bulk - Save ₹800/month\n5️⃣ Reduce electricity usage - Save ₹400/month\n\nTotal potential savings: ₹6,700/month! 🎉";
-    }
-    
-    return "I can help you with:\n\n• How to save money daily\n• Budget analysis\n• Purchase decisions\n• Expense reduction tips\n• Emergency fund planning\n\nWhat would you like to know?";
-  };
-
-  const sendMessage = () => {
-    if (chatInput.trim()) {
-      // Don't allow sending messages if consent modal is showing
-      if (showConsentModal) {
-        return;
-      }
+  const sendMessage = async () => {
+    if (chatInput.trim() && !isSending) {
+      if (showConsentModal) return;
 
       const userMessage: ChatMessage = { sender: 'user', text: chatInput };
-      setChatMessages([...chatMessages, userMessage]);
-      
-      setTimeout(() => {
-        const response = getAIResponse(chatInput);
-        const aiMessage: ChatMessage = { sender: 'ai', text: response };
-        setChatMessages(prev => [...prev, aiMessage]);
-      }, 500);
-      
+      setChatMessages(prev => [...prev, userMessage]);
       setChatInput('');
+      setIsSending(true);
+
+      try {
+        const res = await chat(chatInput);
+        const aiMessage: ChatMessage = { sender: 'ai', text: res.reply };
+        setChatMessages(prev => [...prev, aiMessage]);
+      } catch (error) {
+        console.error("Chat error:", error);
+        setChatMessages(prev => [...prev, { sender: 'ai', text: "Sorry, I'm having trouble connecting to the server." }]);
+      } finally {
+        setIsSending(false);
+      }
     }
   };
+
+  const startRecording = async () => {
+    if (isRecording) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+
+      audioChunksRef.current = [];
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = event => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        try {
+          const res = await voiceToText(blob);
+          if (res.text) {
+            setChatInput(res.text);
+            // Optionally auto-send:
+            // sendMessage(); 
+            // But for safer UX, let user review text first.
+          }
+        } catch (err) {
+          console.error("Voice to text error:", err);
+          setChatMessages(prev => [...prev, { sender: 'ai', text: "Sorry, I couldn't hear that clearly." }]);
+        } finally {
+          setIsRecording(false);
+        }
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Mic error:", err);
+      setChatMessages(prev => [...prev, { sender: 'ai', text: "Please allow microphone access to use voice." }]);
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+    }
+  };
+
 
   const handleQuickQuestion = (question: string) => {
     setChatInput(question);
@@ -126,7 +133,7 @@ const ChatPage: React.FC<ChatPageProps> = ({ chatMessages, setChatMessages, prof
   return (
     <div style={styles.profileContainer}>
       {showConsentModal && (
-        <ConsentModal 
+        <ConsentModal
           onAccept={handleAcceptConsent}
           onDeny={handleDenyConsent}
         />
@@ -189,12 +196,26 @@ const ChatPage: React.FC<ChatPageProps> = ({ chatMessages, setChatMessages, prof
               onChange={(e) => setChatInput(e.target.value)}
               onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
               style={{ ...styles.input, flex: 1 }}
-              placeholder={showConsentModal ? "Please respond to the consent request first..." : "Ask me anything about your money..."}
-              disabled={showConsentModal}
+              placeholder={showConsentModal ? "Please respond to the consent request first..." : isRecording ? "Listening..." : "Ask me anything..."}
+              disabled={showConsentModal || isRecording}
             />
-            <button 
-              onClick={sendMessage} 
-              style={{...styles.sendButton, opacity: showConsentModal ? 0.5 : 1, cursor: showConsentModal ? 'not-allowed' : 'pointer'}}
+            <button
+              type="button"
+              onClick={isRecording ? stopRecording : startRecording}
+              style={{
+                ...styles.micButton,
+                ...(isRecording ? styles.micButtonRecording : {}),
+                opacity: showConsentModal ? 0.5 : 1,
+                cursor: showConsentModal ? 'not-allowed' : 'pointer'
+              }}
+              disabled={showConsentModal}
+              title={isRecording ? "Stop Recording" : "Start Voice Input"}
+            >
+              <span style={{ fontSize: '18px' }}>{isRecording ? '🟥' : '🎙️'}</span>
+            </button>
+            <button
+              onClick={sendMessage}
+              style={{ ...styles.sendButton, opacity: showConsentModal ? 0.5 : 1, cursor: showConsentModal ? 'not-allowed' : 'pointer' }}
               disabled={showConsentModal}
             >
               <SendIcon />
@@ -343,6 +364,24 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: '12px',
     color: '#9ca3af',
     marginTop: '8px',
+  },
+  micButton: {
+    width: '42px',
+    height: '42px',
+    borderRadius: '12px',
+    border: '1px solid #d1d5db',
+    background: 'white',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    cursor: 'pointer',
+    transition: 'all 0.2s',
+  },
+  micButtonRecording: {
+    background: '#fee2e2',
+    borderColor: '#ef4444',
+    color: '#dc2626',
+    animation: 'pulse 1.5s infinite',
   },
 };
 

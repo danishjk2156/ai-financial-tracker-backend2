@@ -11,35 +11,63 @@ import ChatPage from './components/Pages/ChatPage';
 import LoginPage from './components/Auth/LoginPage';
 import RegisterPage from './components/Auth/RegisterPage';
 import type { Profile, Expense, ChatMessage } from './components/Types';
+import { getProfile, listExpenses } from './api/endpoints';
+import GandhiChatbot from './components/Layout/GandhiChatbot';
 
 // Main App Component that uses Auth
 const AppContent: React.FC = () => {
   const { user, logout, isAuthenticated } = useAuth();
   const [activeTab, setActiveTab] = useState<string>('home');
   const [showLogin, setShowLogin] = useState<'login' | 'register' | null>(isAuthenticated ? null : 'login');
-  
-  // Use user data from auth context
+
   const [profile, setProfile] = useState<Profile>(
-    user?.profile || {
+    {
       monthlyIncome: 0,
       fixedExpenses: 0,
-      savingsGoal: 0
+      savingsGoal: 0,
     }
   );
 
-  const [expenses, setExpenses] = useState<Expense[]>(user?.expenses || []);
+  const [expenses, setExpenses] = useState<Expense[]>([]);
 
-  // Sync profile and expenses when user changes
   useEffect(() => {
-    if (user) {
-      setProfile(user.profile || {
-        monthlyIncome: 0,
-        fixedExpenses: 0,
-        savingsGoal: 0
-      });
-      setExpenses(user.expenses || []);
-    }
-  }, [user]);
+    const loadData = async () => {
+      if (!isAuthenticated) {
+        setProfile({
+          monthlyIncome: 0,
+          fixedExpenses: 0,
+          savingsGoal: 0,
+        });
+        setExpenses([]);
+        return;
+      }
+      try {
+        const backendProfile = await getProfile();
+        if (backendProfile) {
+          setProfile({
+            monthlyIncome: backendProfile.monthlyincome ?? 0,
+            fixedExpenses: 0,
+            savingsGoal: backendProfile.goal ?? 0,
+          });
+        }
+        const backendExpenses = await listExpenses();
+        setExpenses(
+          backendExpenses.map(exp => ({
+            id: exp.id,
+            amount: exp.amount,
+            category: exp.category,
+            description: exp.description || '',
+            paymentMethod: exp.payment_method,
+            date: new Date(exp.created_at).toLocaleDateString(),
+          }))
+        );
+      } catch {
+        // fail silently for now
+      }
+    };
+
+    loadData();
+  }, [isAuthenticated]);
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
     { sender: 'ai', text: "Namaste! 🙏\n\nI'm your personal finance buddy. I can help you with:\n\n• Saving tips - Simple ways to save money daily\n• Budget check - See if you're on track\n• Spending advice - Where you can cut costs\n• Purchase decisions - Should you buy it?\n\nAsk me anything about your money!" }
   ]);
@@ -60,14 +88,14 @@ const AppContent: React.FC = () => {
   if (!isAuthenticated) {
     if (showLogin === 'login') {
       return (
-        <LoginPage 
+        <LoginPage
           onSwitchToRegister={() => setShowLogin('register')}
           onLoginSuccess={handleAuthSuccess}
         />
       );
     }
     return (
-      <RegisterPage 
+      <RegisterPage
         onSwitchToLogin={() => setShowLogin('login')}
         onRegisterSuccess={handleAuthSuccess}
       />
@@ -98,8 +126,8 @@ const AppContent: React.FC = () => {
       <Header />
       <div style={styles.userBar}>
         <div style={styles.userInfo}>
-          <span style={styles.userName}>👋 Welcome, {user?.name}</span>
-          <span style={styles.userEmail}>{user?.email}</span>
+          <span style={styles.userName}>👋 Welcome, {user?.name || user?.username}</span>
+          <span style={styles.userEmail}>{user?.email || user?.username}</span>
         </div>
         <button onClick={handleLogout} style={styles.logoutButton}>
           Logout
@@ -129,14 +157,15 @@ const AppContent: React.FC = () => {
         )}
 
         {activeTab === 'chat' && (
-          <ChatPage 
+          <ChatPage
             chatMessages={chatMessages}
             setChatMessages={setChatMessages}
-            profile={profile}
-            expenses={expenses}
           />
         )}
       </div>
+
+      {/* Gandhi chatbot floating on all pages */}
+      <GandhiChatbot />
     </div>
   );
 };

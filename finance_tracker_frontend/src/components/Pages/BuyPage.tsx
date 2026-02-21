@@ -3,52 +3,63 @@ import { ShoppingCartIcon, SparklesIcon, CheckIcon } from '../Layout/Icons';
 import Card from '../Common/Card';
 import Button from '../Common/Button';
 import type { AnalysisResult, BuyForm, Profile, Expense } from '../Types';
+import { analyzePurchase as apiAnalyzePurchase } from '../../api/endpoints';
+
+const parsePrice = (priceStr: string): number => {
+  if (!priceStr || priceStr === 'Not listed') return Infinity;
+  const num = parseFloat(priceStr.replace(/[^0-9.]/g, ''));
+  return isNaN(num) ? Infinity : num;
+};
 
 interface BuyPageProps {
   profile: Profile;
   expenses: Expense[];
 }
 
-const BuyPage: React.FC<BuyPageProps> = ({ profile, expenses }) => {
+const BuyPage: React.FC<BuyPageProps> = ({ }) => {
   const [buyForm, setBuyForm] = useState<BuyForm>({
     productName: '',
     offlinePrice: ''
   });
   const [analysisResult, setAnalysisResult] = useState<AnalysisResult | null>(null);
+  const [loading, setLoading] = useState(false);
 
-  const analyzePurchase = () => {
+  const handleAnalyzePurchase = async () => {
     if (!buyForm.productName || !buyForm.offlinePrice) return;
+    setLoading(true);
 
-    const availableToSave = profile.monthlyIncome - profile.fixedExpenses - 
-      expenses.reduce((sum, exp) => sum + exp.amount, 0);
-    
-    const offlinePrice = parseInt(buyForm.offlinePrice);
-    const amazonPrice = Math.floor(offlinePrice * (0.85 + Math.random() * 0.1));
-    const flipkartPrice = Math.floor(offlinePrice * (0.87 + Math.random() * 0.1));
-    
-    const savings = offlinePrice - Math.min(amazonPrice, flipkartPrice);
-    const percentOfBudget = ((offlinePrice / availableToSave) * 100).toFixed(1);
-    
-    let aiAdvice = '';
-    if (savings > 200) {
-      aiAdvice = `💡 You're paying ₹${savings} extra offline!\n\n`;
-    }
-    
-    if (parseFloat(percentOfBudget) > 30) {
-      aiAdvice += `⚠️ This purchase is ${percentOfBudget}% of your monthly savings budget.\n\nConsider:\n• Is this urgent?\n• Can you wait for a sale?\n• Do you have alternatives?`;
-    } else {
-      aiAdvice += `✅ This purchase fits your budget (${percentOfBudget}% of savings).\n\nBuying online can save you ₹${savings}. Delivery in 2-3 days.`;
-    }
+    try {
+      const offlinePrice = parseFloat(buyForm.offlinePrice);
+      const res = await apiAnalyzePurchase(buyForm.productName, offlinePrice);
 
-    setAnalysisResult({
-      productName: buyForm.productName,
-      offline: offlinePrice,
-      amazon: amazonPrice,
-      flipkart: flipkartPrice,
-      bestPrice: Math.min(amazonPrice, flipkartPrice),
-      savings: savings,
-      advice: aiAdvice
-    });
+      const onlineResults = res.online_results || [];
+
+      // Calculate best price and savings locally from the search results
+      let bestOnlinePrice = Infinity;
+      onlineResults.forEach(item => {
+        const p = parsePrice(item.price);
+        if (p < bestOnlinePrice) bestOnlinePrice = p;
+      });
+
+      // If no valid online prices, assume offline is best or handle appropriately
+      if (bestOnlinePrice === Infinity) bestOnlinePrice = offlinePrice;
+
+      const savings = Math.max(0, offlinePrice - bestOnlinePrice);
+
+      setAnalysisResult({
+        productName: res.product,
+        offline: res.offline_price,
+        bestPrice: bestOnlinePrice,
+        savings: savings,
+        advice: res.ai_decision,
+        onlineResults: onlineResults // map backend types if needed, but they match our Interface
+      });
+    } catch (error) {
+      console.error("Failed to analyze purchase:", error);
+      // Optional: set error state
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -84,8 +95,8 @@ const BuyPage: React.FC<BuyPageProps> = ({ profile, expenses }) => {
             <p style={styles.helperText}>Price you saw at local store/shop</p>
           </div>
 
-          <Button variant="dark" onClick={analyzePurchase}>
-            <SparklesIcon /> Analyze Purchase
+          <Button variant="dark" onClick={handleAnalyzePurchase} disabled={loading}>
+            <SparklesIcon /> {loading ? 'Analyzing...' : 'Analyze Purchase'}
           </Button>
         </div>
       </Card>
@@ -94,18 +105,24 @@ const BuyPage: React.FC<BuyPageProps> = ({ profile, expenses }) => {
         <Card style={{ marginTop: '24px' }}>
           <h3 style={styles.cardHeaderTitle}>Price Comparison for {analysisResult.productName}</h3>
 
-          <div style={{ ...styles.statsGrid, marginTop: '24px', marginBottom: '24px' }}>
-            <div style={styles.priceCard}>
-              <div style={styles.helperText}>Amazon</div>
-              <div style={styles.priceValue}>₹{analysisResult.amazon.toLocaleString()}</div>
-              <div style={styles.priceDelivery}>Delivery: 2-3 days</div>
-            </div>
 
-            <div style={styles.priceCard}>
-              <div style={styles.helperText}>Flipkart</div>
-              <div style={styles.priceValue}>₹{analysisResult.flipkart.toLocaleString()}</div>
-              <div style={styles.priceDelivery}>Delivery: 2-4 days</div>
-            </div>
+          <div style={{ ...styles.statsGrid, marginTop: '24px', marginBottom: '24px' }}>
+            {analysisResult.onlineResults && analysisResult.onlineResults.length > 0 ? (
+              analysisResult.onlineResults.slice(0, 3).map((item, index) => (
+                <div key={index} style={styles.priceCard}>
+                  <div style={styles.helperText}>{item.source || 'Online Store'}</div>
+                  <div style={styles.priceValue}>{item.price}</div>
+                  <div style={styles.priceDelivery}>
+                    {item.rating && item.rating !== 'No rating data' ? `★ ${item.rating}` : 'No rating'}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div style={styles.priceCard}>
+                <div style={styles.helperText}>Online</div>
+                <div style={styles.priceValue}>No results found</div>
+              </div>
+            )}
 
             <div style={styles.priceCardOrange}>
               <div style={styles.priceLabel}>Offline price</div>

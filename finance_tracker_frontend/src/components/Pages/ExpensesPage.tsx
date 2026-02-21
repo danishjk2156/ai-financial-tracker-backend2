@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import { PlusIcon, Trash2Icon, MicIcon } from '../Layout/Icons';
 import Card from '../Common/Card';
 import Button from '../Common/Button';
 import type { Expense, ExpenseInput } from '../Types';
+import { createExpense, deleteExpense as deleteExpenseApi, updateExpense, voiceToText } from '../../api/endpoints';
 
 interface ExpensesPageProps {
   expenses: Expense[];
@@ -25,9 +26,17 @@ const ExpensesPage: React.FC<ExpensesPageProps> = ({ expenses, setExpenses }) =>
     description: '',
     paymentMethod: 'UPI'
   });
+  const [editingExpense, setEditingExpense] = useState<Expense | null>(null);
+  const [editInput, setEditInput] = useState<ExpenseInput>({
+    amount: '',
+    category: 'Food',
+    description: '',
+    paymentMethod: 'UPI',
+  });
   const [isListening, setIsListening] = useState(false);
   const [selectedMonth, setSelectedMonth] = useState<string | null>(null);
-  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const categories = ['Food', 'Travel', 'Rent', 'Education', 'Medical', 'Entertainment', 'Miscellaneous'];
 
@@ -53,85 +62,144 @@ const ExpensesPage: React.FC<ExpensesPageProps> = ({ expenses, setExpenses }) =>
     return { amount, category, description, paymentMethod: 'UPI' };
   };
 
-  const addExpenseFromText = () => {
+  const addExpenseFromText = async () => {
     const parsed = parseExpenseInput(expenseInput);
     if (parsed) {
+      const backend = await createExpense({
+        amount: parsed.amount,
+        category: parsed.category,
+        description: parsed.description,
+        payment_method: parsed.paymentMethod,
+      });
       const expense: Expense = {
-        id: Date.now(),
-        ...parsed,
-        date: new Date().toLocaleDateString()
+        id: backend.id,
+        amount: backend.amount,
+        category: backend.category,
+        description: backend.description || '',
+        paymentMethod: backend.payment_method,
+        date: new Date(backend.created_at).toLocaleDateString(),
       };
       setExpenses([expense, ...expenses]);
       setExpenseInput('');
     }
   };
 
-  const addManualExpense = () => {
+  const addManualExpense = async () => {
     if (newExpense.amount) {
-      const expense: Expense = {
-        id: Date.now(),
+      const backend = await createExpense({
         amount: parseInt(newExpense.amount),
         category: newExpense.category,
         description: newExpense.description,
-        paymentMethod: newExpense.paymentMethod,
-        date: new Date().toLocaleDateString()
+        payment_method: newExpense.paymentMethod,
+      });
+      const expense: Expense = {
+        id: backend.id,
+        amount: backend.amount,
+        category: backend.category,
+        description: backend.description || '',
+        paymentMethod: backend.payment_method,
+        date: new Date(backend.created_at).toLocaleDateString(),
       };
       setExpenses([expense, ...expenses]);
       setNewExpense({ amount: '', category: 'Food', description: '', paymentMethod: 'UPI' });
     }
   };
 
-  const deleteExpense = (id: number) => {
+  const deleteExpense = async (id: number) => {
+    await deleteExpenseApi(id);
     setExpenses(expenses.filter(exp => exp.id !== id));
   };
 
-  // Voice recognition setup
-  useEffect(() => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognitionClass = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      recognitionRef.current = new SpeechRecognitionClass();
-      recognitionRef.current.continuous = false;
-      recognitionRef.current.interimResults = false;
-      recognitionRef.current.lang = 'en-US';
+  const startEdit = (exp: Expense) => {
+    setEditingExpense(exp);
+    setEditInput({
+      amount: String(exp.amount),
+      category: exp.category,
+      description: exp.description || '',
+      paymentMethod: exp.paymentMethod,
+    });
+  };
 
-      recognitionRef.current.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setExpenseInput(transcript);
-        setIsListening(false);
-        
-        // Auto-fill the form
-        const parsed = parseExpenseInput(transcript);
-        if (parsed) {
-          setNewExpense({
-            amount: parsed.amount.toString(),
-            category: parsed.category,
-            description: parsed.description,
-            paymentMethod: parsed.paymentMethod
-          });
+  const cancelEdit = () => {
+    setEditingExpense(null);
+  };
+
+  const saveEdit = async () => {
+    if (!editingExpense) return;
+
+    const updated = await updateExpense(editingExpense.id, {
+      amount: editInput.amount ? parseFloat(editInput.amount) : undefined,
+      category: editInput.category,
+      description: editInput.description,
+      payment_method: editInput.paymentMethod,
+    });
+
+    setExpenses(
+      expenses.map(e =>
+        e.id === editingExpense.id
+          ? {
+              ...e,
+              amount: updated.amount,
+              category: updated.category,
+              description: updated.description || '',
+              paymentMethod: updated.payment_method,
+              date: new Date(updated.created_at).toLocaleDateString(),
+            }
+          : e
+      )
+    );
+
+    setEditingExpense(null);
+  };
+
+  const startVoiceRecognition = async () => {
+    if (isListening) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      audioChunksRef.current = [];
+      mediaRecorderRef.current = recorder;
+
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
       };
 
-      recognitionRef.current.onerror = () => {
-        setIsListening(false);
+      recorder.onstop = async () => {
+        stream.getTracks().forEach(track => track.stop());
+        const blob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        try {
+          const res = await voiceToText(blob);
+          const transcript = res.text || '';
+          setExpenseInput(transcript);
+
+          const parsed = parseExpenseInput(transcript);
+          if (parsed) {
+            setNewExpense({
+              amount: parsed.amount.toString(),
+              category: parsed.category,
+              description: parsed.description,
+              paymentMethod: parsed.paymentMethod
+            });
+          }
+        } catch {
+          // If transcription fails, just stop listening
+        } finally {
+          setIsListening(false);
+        }
       };
 
-      recognitionRef.current.onend = () => {
-        setIsListening(false);
-      };
-    }
-  }, []);
-
-  const startVoiceRecognition = () => {
-    if (recognitionRef.current && !isListening) {
+      recorder.start();
       setIsListening(true);
-      recognitionRef.current.start();
+    } catch {
+      setIsListening(false);
     }
   };
 
   const stopVoiceRecognition = () => {
-    if (recognitionRef.current && isListening) {
-      recognitionRef.current.stop();
-      setIsListening(false);
+    if (mediaRecorderRef.current && isListening) {
+      mediaRecorderRef.current.stop();
     }
   };
 
@@ -362,6 +430,9 @@ const ExpensesPage: React.FC<ExpensesPageProps> = ({ expenses, setExpenses }) =>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
                   <div style={styles.expenseAmountLarge}>₹{exp.amount}</div>
+                  <button onClick={() => startEdit(exp)} style={styles.editButton}>
+                    Edit
+                  </button>
                   <button onClick={() => deleteExpense(exp.id)} style={styles.deleteButton}>
                     <Trash2Icon />
                   </button>
@@ -371,6 +442,73 @@ const ExpensesPage: React.FC<ExpensesPageProps> = ({ expenses, setExpenses }) =>
           </div>
         )}
       </Card>
+
+      {/* Edit Expense Modal */}
+      {editingExpense && (
+        <div style={styles.modalOverlay}>
+          <div style={styles.modal}>
+            <h3 style={styles.modalTitle}>Update Expense</h3>
+
+            <div style={styles.formGrid}>
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Amount (₹)</label>
+                <input
+                  type="number"
+                  value={editInput.amount}
+                  onChange={(e) => setEditInput({ ...editInput, amount: e.target.value })}
+                  style={styles.input}
+                />
+              </div>
+
+              <div style={styles.formGroup}>
+                <label style={styles.label}>Category</label>
+                <select
+                  value={editInput.category}
+                  onChange={(e) => setEditInput({ ...editInput, category: e.target.value })}
+                  style={styles.input}
+                >
+                  {categories.map(cat => (
+                    <option key={cat} value={cat}>{cat}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Description</label>
+              <input
+                type="text"
+                value={editInput.description}
+                onChange={(e) => setEditInput({ ...editInput, description: e.target.value })}
+                style={styles.input}
+              />
+            </div>
+
+            <div style={styles.formGroup}>
+              <label style={styles.label}>Payment Method</label>
+              <select
+                value={editInput.paymentMethod}
+                onChange={(e) => setEditInput({ ...editInput, paymentMethod: e.target.value })}
+                style={styles.input}
+              >
+                <option value="UPI">UPI</option>
+                <option value="Cash">Cash</option>
+                <option value="Card">Card</option>
+                <option value="Net Banking">Net Banking</option>
+              </select>
+            </div>
+
+            <div style={styles.modalActions}>
+              <button type="button" onClick={cancelEdit} style={styles.modalCancel}>
+                Cancel
+              </button>
+              <button type="button" onClick={() => void saveEdit()} style={styles.modalSave}>
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -495,6 +633,16 @@ const styles: { [key: string]: React.CSSProperties } = {
     cursor: 'pointer',
     transition: 'background-color 0.2s',
   },
+  editButton: {
+    padding: '8px 10px',
+    color: '#1e40af',
+    backgroundColor: '#dbeafe',
+    border: '1px solid #bfdbfe',
+    borderRadius: '8px',
+    cursor: 'pointer',
+    fontSize: '13px',
+    fontWeight: 600,
+  },
   buttonGroup: {
     display: 'flex',
     gap: '12px',
@@ -615,6 +763,53 @@ const styles: { [key: string]: React.CSSProperties } = {
     fontSize: '10px',
     fontWeight: 600,
     color: '#16a34a',
+  },
+  modalOverlay: {
+    position: 'fixed',
+    inset: 0,
+    backgroundColor: 'rgba(0,0,0,0.35)',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+    zIndex: 60,
+  },
+  modal: {
+    width: '100%',
+    maxWidth: 520,
+    backgroundColor: '#ffffff',
+    borderRadius: 12,
+    padding: 16,
+    boxShadow: '0 20px 40px rgba(0,0,0,0.25)',
+  },
+  modalTitle: {
+    fontSize: '18px',
+    fontWeight: 700,
+    marginBottom: 16,
+    color: '#111827',
+  },
+  modalActions: {
+    display: 'flex',
+    justifyContent: 'flex-end',
+    gap: 10,
+    marginTop: 16,
+  },
+  modalCancel: {
+    padding: '10px 14px',
+    backgroundColor: '#f3f4f6',
+    border: '1px solid #e5e7eb',
+    borderRadius: 8,
+    cursor: 'pointer',
+    fontWeight: 600,
+  },
+  modalSave: {
+    padding: '10px 14px',
+    backgroundColor: '#16a34a',
+    color: 'white',
+    border: 'none',
+    borderRadius: 8,
+    cursor: 'pointer',
+    fontWeight: 600,
   },
 };
 

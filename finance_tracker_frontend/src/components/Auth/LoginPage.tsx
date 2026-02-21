@@ -11,7 +11,7 @@ const LoginPage: React.FC<LoginPageProps> = ({
   onSwitchToRegister,
   onLoginSuccess,
 }) => {
-  const [credentials, setCredentials] = useState({ email: '', password: '' });
+  const [credentials, setCredentials] = useState({ username: '', password: '' });
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -22,7 +22,7 @@ const LoginPage: React.FC<LoginPageProps> = ({
     setError('');
     setLoading(true);
 
-    const success = await login(credentials.email, credentials.password);
+    const success = await login(credentials.username, credentials.password);
     setLoading(false);
 
     if (success) {
@@ -126,16 +126,16 @@ const LoginPage: React.FC<LoginPageProps> = ({
           <div style={styles.inputGroup}>
             <label style={styles.label}>
               <MailIcon size={16} />
-              <span style={{ marginLeft: 8 }}>Email Address</span>
+              <span style={{ marginLeft: 8 }}>Username</span>
             </label>
             <input
-              type="email"
-              value={credentials.email}
+              type="text"
+              value={credentials.username}
               onChange={(e) =>
-                setCredentials({ ...credentials, email: e.target.value })
+                setCredentials({ ...credentials, username: e.target.value })
               }
               style={styles.input}
-              placeholder="you@example.com"
+              placeholder="Enter your username"
               required
             />
           </div>

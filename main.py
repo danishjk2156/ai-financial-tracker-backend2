@@ -11,10 +11,25 @@ from starlette import status
 from sqlalchemy import func, extract
 from datetime import datetime
 from typing import Optional
+from fastapi.middleware.cors import CORSMiddleware
 
 
 
 app=FastAPI()
+
+# Allow frontend dev server / deployments to call this API
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.include_router(auth.router)
 models.Base.metadata.create_all(bind=engine)
 from fastapi import APIRouter
@@ -196,6 +211,20 @@ def create_expense(user:user_dependency,expense: ExpenseCreate, db: Session = De
     db.commit()
     db.refresh(new_expense)
     return new_expense
+
+@app.get("/expenses/", response_model=List[ExpenseResponse])
+def list_expenses(user: user_dependency, db: Session = Depends(get_db)):
+    """List all expenses for the authenticated user (newest first)."""
+    if user is None:
+        raise HTTPException(status_code=401, detail="Authentication Failed")
+    current_user_id = user["id"]
+    expenses = (
+        db.query(Expense)
+        .filter(Expense.user_id == current_user_id)
+        .order_by(Expense.created_at.desc())
+        .all()
+    )
+    return expenses
 
 @app.get("/expenses/today", response_model=DailyExpenseSummary)
 def get_today_summary(user:user_dependency,db: Session = Depends(get_db)):
@@ -572,7 +601,7 @@ def get_llama_tips(
     return {"tips": ai_response}
 
 import os
-from serpapi import GoogleSearch
+from serpapi import Client
 
 SERP_API_KEY = os.getenv("SERP_API_KEY")
 
@@ -583,11 +612,10 @@ def fetch_shopping_data(product_name: str):
         "gl": "in",            # India
         "hl": "en",
         "location": "India",
-        "api_key": SERP_API_KEY
     }
 
-    search = GoogleSearch(params)
-    results = search.get_dict()
+    client = Client(api_key=SERP_API_KEY)
+    results = client.search(params)
 
     shopping_results = results.get("shopping_results", [])
 
